@@ -37,10 +37,13 @@ original_run = 20
 #################################
 
 #Plots circular generated coordinates in a map image
-plot_option = True
+plot_option = False
 
 #Prints out delta for optimization (finding the accurate total distance)
 print_delta = True
+
+#Prints in case the API fucksup
+api_check = True
 
 
 #%%
@@ -188,6 +191,34 @@ def getting_route(lat, lon, run, angle = pi/2):
 def relative_error(total_distancem, original_run):
     return (total_distance - original_run*1000)/(original_run*1000)
 
+def closer_to_target(prev_option, routes, distance, original_run):
+    """
+    Parameters
+    ----------
+    prev_option : tuple (routes json, distance float)
+        previous distance.
+    routes : json object
+        routes json related to the current closest option.
+    distance : float
+        current calculated distance.
+    original_run : float
+        current target distance for the run.
+
+    Returns
+    -------
+    tuple (routes json, distance float)
+        closest tuple to the distance run
+
+    """
+    prev_distance = prev_option[1]
+    prev_distance_error = abs(original_run - prev_distance)
+    distance_error = abs(original_run - distance)
+    
+    #check the lowest error to the target
+    if prev_distance_error < distance_error:
+        return prev_option
+    return (routes, distance)
+
 #%%
 #################################
 ######     MAIN       ###########
@@ -197,55 +228,80 @@ def relative_error(total_distancem, original_run):
 run = original_run/3
 
 angles = [0, pi/2, pi, 3/4*pi]
+angles_degrees = ['0', '90', '180', '270']
 
-for angle in angles:
+#storing the different possibilities in tuples (routes and distance)
+routing_options = []
+
+#storing the decoded coords for each option
+decoded_options = {}
+
+for (n, angle) in enumerate(angles):
 
     #100m of error on the total route
     precision = 100
     learning_rate = 1
     
-    total_distance = getting_route(lat, lon, run, angle)[-1]
+    routes, total_distance = getting_route(lat, lon, run, angle)
+    lowest_option = (routes, total_distance)
     delta = relative_error(total_distance, original_run)
-        
+    
     #optimization
     while True:
         
-        #store last value of run
-        run_prev = run
-        delta_prev = delta
-        
-        #relative error for optimization reference
-        delta = relative_error(total_distance, original_run)
-        
-        run = run_prev - learning_rate*delta
-        
         #error here, because your are getting another value instead of taking the correct one
         if abs(total_distance - original_run*1000) < precision:
-            (routes, total_distance) = getting_route(lat, lon, run)
+            # (routes, total_distance) = getting_route(lat, lon, run)
+            routing_options.append(lowest_option)
             break
         else:
+            #store last value of run
+            run_prev = run
+            delta_prev = delta
+            
+            #relative error for optimization reference
+            delta = relative_error(total_distance, original_run)
+            
+            run = run_prev - learning_rate*delta
             #in case delta changes to negative or vice-versa
+            
             if (delta*delta_prev > 0 and delta < 0) or (delta*delta_prev < 0 and delta > 0):
                 learning_rate = .2
-            total_distance = getting_route(lat, lon, run)[-1]
             
-        #for testing
-        if print_delta:
-            print('Delta = ', delta,', learning Rate = ', learning_rate)
-            if total_distance < (original_run*1000 - precision):
-                print('Lower', total_distance)
-            elif total_distance > (original_run*1000 + precision):
-                print('Greater', total_distance)
+            #in case the API fucks up somehow
+            try:    
+                #get a new distance value
+                (routes, total_distance) = getting_route(lat, lon, run)
+            except:
+                #for testing
+                if api_check:
+                    print("API fuckup")
+                routing_options.append(lowest_option)
+                break
+            
+            #store the info closest to target distance
+            lowest_option = closer_to_target(lowest_option, routes, total_distance, original_run)
+            
+            
+            #for testing
+            if print_delta:
+                print('Delta = ', delta,', learning Rate = ', learning_rate)
+                if total_distance < (original_run*1000 - precision):
+                    print('Lower', total_distance)
+                elif total_distance > (original_run*1000 + precision):
+                    print('Greater', total_distance)
         
     #for testing
     if print_delta:
-        print('Done', total_distance)
+        print('Done', lowest_option[1])
                 
         
     
     # get the geometry from the routes and decode_polyline needs the geometry only
-    geometry = routes['routes'][0]['geometry']
+    geometry = lowest_option[0]['routes'][0]['geometry']
     decoded = convert.decode_polyline(geometry)
+    
+    decoded_options[angles_degrees[n]] = decoded["coordinates"]
 
 
 
