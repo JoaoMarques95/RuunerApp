@@ -30,9 +30,6 @@ lon = g.lng
 #Requested running distance
 original_run = 20
 
-#tuning the distance due to mapping
-run = original_run/3
-
 
 #%%
 #################################
@@ -40,7 +37,7 @@ run = original_run/3
 #################################
 
 #Plots circular generated coordinates in a map image
-plot_option = False
+plot_option = True
 
 #Prints out delta for optimization (finding the accurate total distance)
 print_delta = True
@@ -196,6 +193,9 @@ def relative_error(total_distancem, original_run):
 ######     MAIN       ###########
 #################################
 
+#tuning the distance due to mapping
+run = original_run/3
+
 angles = [0, pi/2, pi, 3/4*pi]
 
 for angle in angles:
@@ -219,7 +219,7 @@ for angle in angles:
         
         run = run_prev - learning_rate*delta
         
-        
+        #error here, because your are getting another value instead of taking the correct one
         if abs(total_distance - original_run*1000) < precision:
             (routes, total_distance) = getting_route(lat, lon, run)
             break
