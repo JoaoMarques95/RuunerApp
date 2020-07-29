@@ -9,9 +9,9 @@ import openrouteservice
 from openrouteservice import convert
 
 #map plotting
-import numpy as np
+#import numpy as np
 import math
-import pandas as pd
+#import pandas as pd
 import matplotlib.pyplot as plt
 
 #albes python to get current location
@@ -22,13 +22,22 @@ import geocoder
 ###########FRONT END#############
 #################################
 
+class FrontEndRequest(object):
+    def __init__(self, lat, lng, original_run):
+        self.lat = lat
+        self.lng = lng
+        self.original_run = original_run
+
 #getting current location
 g = geocoder.ip('me')
 lat = g.lat
-lon = g.lng
+lng = g.lng
 
 #Requested running distance
 original_run = 20
+
+#creat request object
+front_end_request = FrontEndRequest(lat, lng, original_run)
 
 
 #%%
@@ -52,7 +61,7 @@ original_run = 20
 #################################
 
 # generates list with coordinate pairs in tuples, from the center
-def geodesic_point_buffer(lat, lon, radius, angle = pi/2):
+def geodesic_point_buffer(front_end_request, radius, angle = pi/2):
     """
     Parameters
     ----------
@@ -80,7 +89,7 @@ def geodesic_point_buffer(lat, lon, radius, angle = pi/2):
     aeqd_proj = '+proj=aeqd +lat_0={lat} +lon_0={lon} +x_0=0 +y_0=0'
     project = partial(
         pyproj.transform,
-        pyproj.Proj(aeqd_proj.format(lat=lat, lon=lon)),
+        pyproj.Proj(aeqd_proj.format(lat=front_end_request.lat, lon=front_end_request.lng)),
         proj_wgs84)
     #on Point(lat,lng) higher the buffer on lat - the higher the lat, same for lng
     #multiplying the lat or lng inside the Point() with 1000*radius, makes the point go to one of the edges
@@ -90,7 +99,7 @@ def geodesic_point_buffer(lat, lon, radius, angle = pi/2):
     return transform(project, buf).exterior.coords[:]
 
 #just to separate lat and long
-def plotting_coords_in_map(map_file, coords):
+def plotting_coords_in_map(front_end_request, map_file, coords):
     """
     Parameters
     ----------
@@ -121,28 +130,31 @@ def plotting_coords_in_map(map_file, coords):
     fig, ax = plt.subplots(figsize = (8,7))
     
     ax.scatter(lng_list, lat_list, zorder=1, alpha=0.7, c='r', s=50)
-    ax.scatter(lat, lon, zorder=2, alpha=0.7, c='b', s=500)
+    ax.scatter(front_end_request.lat, front_end_request.lng, zorder=2, alpha=0.7, c='b', s=500)
     
     ax.set_title('Plotting the route')
     ax.set_xlim(bounding_box[0], bounding_box[1],bounding_box[2], bounding_box[3])
     ax.imshow(map_image, zorder=0, extent=bounding_box, aspect='auto')
     
-def getting_route(lat, lon, run, angle = pi/2):
+class Route(object):
+    def __init__(self, route_json):
+        self.route = route_json
+        self.distance = route_json['routes'][0]['summary']['distance'] 
+
+def getting_route(front_end_request, run, angle = pi/2, plot_option = False):
     """
 
     Parameters
     ----------
-    lat : float
-        Lattitude of the coordinate.
-    lon : flat
-        Longitude of the coordinate.
+    front_end_request : FrontEndRequest
+        Object with the info requested from the front end.
     run : float
         Running distance requested by the user.
 
     Returns
     -------
-    tuple (JSON, float)
-        a tuple with the route json and the float of the distance of the route
+    Route
+        a route object
 
     """
     radius = run/(2*pi)
@@ -152,7 +164,7 @@ def getting_route(lat, lon, run, angle = pi/2):
     
     #generate the coords
     #coords = geodesic_point_buffer(lat, lon, radius)
-    coords = geodesic_point_buffer(lat, lon, radius, angle)
+    coords = geodesic_point_buffer(front_end_request, radius, angle)
     
     #turn coords in list in order to reduce to half
     #coords = []
@@ -169,7 +181,7 @@ def getting_route(lat, lon, run, angle = pi/2):
     
     #for testing
     if plot_option:
-        plotting_coords_in_map('map.png', coords)      
+        plotting_coords_in_map(front_end_request, 'map.png', coords)      
         print("map ploted")
     
     #python openstreetmaps.py 
@@ -182,11 +194,11 @@ def getting_route(lat, lon, run, angle = pi/2):
     coords_b = tuple(coords)
     
     #get the full route
-    routes = client.directions(coords_b, profile='cycling-regular', optimize_waypoints=False)
+    route_json = client.directions(coords_b, profile='cycling-regular', optimize_waypoints=False)
     
-    total_distance = routes['routes'][0]['summary']['distance']
+    route = Route(route_json)
     
-    return (routes, total_distance)
+    return route
 
 def relative_error(total_distance, original_run):
     """
@@ -204,7 +216,9 @@ def relative_error(total_distance, original_run):
     """
     return (total_distance - original_run*1000)/(original_run*1000)
 
-def closer_to_target(prev_option, routes, distance, original_run):
+
+
+def closer_to_target(prev_option, route, original_run):
     """
     Parameters
     ----------
@@ -223,21 +237,21 @@ def closer_to_target(prev_option, routes, distance, original_run):
         closest tuple to the distance run
 
     """
-    prev_distance = prev_option[1]
+    prev_distance = prev_option.distance
     prev_distance_error = abs(original_run - prev_distance)
-    distance_error = abs(original_run - distance)
+    distance_error = abs(original_run - route.distance)
     
     #check the lowest error to the target
     if prev_distance_error < distance_error:
         return prev_option
     
-    return (routes, distance)
+    return route
 
 #%%
 #################################
 ######     MAIN       ###########
 #################################
-def main_as_function(lat, lon, original_run, print_delta = False, plot_option = False, api_check = False):
+def main_as_function(front_end_request, print_delta = False, plot_option = False, api_check = False):
     """
     Parameters
     ----------
@@ -261,7 +275,7 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
 
     """
     #tuning the distance due to mapping
-    run = original_run/3
+    run = front_end_request.original_run/3
     
     angles = [0, pi/2, pi, 3/4*pi]
     angles_degrees = ['0', '90', '180', '270']
@@ -278,9 +292,9 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
         precision = 100
         learning_rate = 1
         
-        routes, total_distance = getting_route(lat, lon, run, angle)
-        lowest_option = (routes, total_distance)
-        delta = relative_error(total_distance, original_run)
+        route = getting_route(front_end_request, run, angle, plot_option)
+        lowest_option = route
+        delta = relative_error(route.distance, front_end_request.original_run)
         
         #limit api requests
         count = 0
@@ -288,7 +302,7 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
         #optimization
         while count < 5:
             #check target compliance
-            if abs(total_distance - original_run*1000) < precision:
+            if abs(route.distance - front_end_request.original_run*1000) < precision:
                 routing_options.append(lowest_option)
                 break
             else:
@@ -297,7 +311,7 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
                 delta_prev = delta
                 
                 #relative error for optimization reference
-                delta = relative_error(total_distance, original_run)
+                delta = relative_error(route.distance, front_end_request.original_run)
                 
                 run = run_prev - learning_rate*delta
                 #in case delta changes to negative or vice-versa
@@ -308,7 +322,7 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
                 #in case the API fucks up somehow
                 try:    
                     #get a new distance value
-                    (routes, total_distance) = getting_route(lat, lon, run)
+                    route = getting_route(front_end_request, run)
                 except:
                     #for testing
                     if api_check:
@@ -317,28 +331,28 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
                     break
                 
                 #store the info closest to target distance
-                lowest_option = closer_to_target(lowest_option, routes, total_distance, original_run)
+                lowest_option = closer_to_target(lowest_option, route, original_run)
                 
                 
                 #for testing
                 if print_delta:
                     print('Delta = ', delta,', learning Rate = ', learning_rate)
-                    if total_distance < (original_run*1000 - precision):
-                        print('Lower', total_distance)
-                    elif total_distance > (original_run*1000 + precision):
-                        print('Greater', total_distance)
+                    if route.distance < (front_end_request.original_run*1000 - precision):
+                        print('Lower', route.distance)
+                    elif route.distance > (front_end_request.original_run*1000 + precision):
+                        print('Greater', route.distance)
                 
                 #upp the counter
                 count += 1
             
         #for testing
         if print_delta:
-            print('Done', lowest_option[1])
+            print('Done', lowest_option.distance)
                     
             
         
         # get the geometry from the routes and decode_polyline needs the geometry only
-        geometry = lowest_option[0]['routes'][0]['geometry']
+        geometry = lowest_option.route['routes'][0]['geometry']
         decoded = convert.decode_polyline(geometry)
         
         #prepare the json object with the angles and the coordinates
@@ -346,7 +360,7 @@ def main_as_function(lat, lon, original_run, print_delta = False, plot_option = 
         
     return decoded_options
 
-
+decoded_options = main_as_function(front_end_request, print_delta=True)
 
 
 
